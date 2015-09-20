@@ -1,6 +1,7 @@
 package com.pengfeix.learning;
 
 import java.util.Random;
+import java.util.logging.Logger;
 
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.Watcher;
@@ -18,6 +19,8 @@ import org.apache.zookeeper.KeeperException.Code;
 
 
 public class Master implements Watcher {
+    private static final Logger LOG = LoggerFactory.getLogger(Worker.class);
+
     ZooKeeper zk;
     String hostPort;
     Boolean isLeader = false;
@@ -119,6 +122,33 @@ public class Master implements Watcher {
         createParent("/status", new byte[0]);
     }
 
+    void createParent(String path, byte[] data) {
+        zk.create(path,
+                  data,
+                  Ids.OPEN_ACL_UNSAFE,
+                  CreateMode.PERSISTENT,
+                  createParentCallback,
+                  data);
+    }
+
+    StringCallback createParentCallback = new StringCallback() {
+        public void processResult(int rc, String path, Object ctx, String name) {
+            switch (Code.get(rc)) {
+                case CONNECTIONLOSS:
+                    createParent(path, (byte[]) ctx);
+                    break;
+                case OK:
+                    LOG.info("Parent created");
+                    break;
+                case NODEEXISTS:
+                    LOG.warn("Parent already registered: " + path);
+                    break;
+                default:
+                    LOG.error("Something went wrong: ", KeeperException.create(Code.get(rc), path));
+            }
+        }
+    };
+
     public static void main(String[] args) throws Exception {
         Master m = new Master(args[0]);
         m.startZk();
@@ -129,10 +159,13 @@ public class Master implements Watcher {
 
         if (m.isLeader) {
             System.out.println("i am the Leader");
-            Thread.sleep(60000);
+            Thread.sleep(6000);
         } else {
             System.out.println("someone else is the Leader");
         }
+
+        m.bootstrap();
+        Thread.sleep(60000);
 
         m.stopZk();
     }
